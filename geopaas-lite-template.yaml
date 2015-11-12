@@ -1,0 +1,249 @@
+apiVersion: v1
+kind: Template
+labels:
+  template: GeoSuite
+metadata:
+  annotations:
+    description: GeoExplorer and GeoServer
+    iconClass: icon-tomcat
+    tags: geopaaslite
+  creationTimestamp: null
+  name: GeoPaaS Lite
+objects:
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      description: Exposes and load balances the application pods
+    name: geoserver
+  spec:
+    ports:
+    - name: web
+      port: 8080
+      targetPort: 8080
+    - name: psql
+      port: 5432
+      targetPort: 5432
+    selector:
+      name: geoserver
+- apiVersion: v1
+  kind: Route
+  metadata:
+    name: geoserver
+  spec:
+    to:
+      kind: Service
+      name: geoserver
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      description: Exposes and load balances the application pods
+    name: geoexplorer
+  spec:
+    ports:
+    - name: web
+      port: 8080
+      targetPort: 8080
+    selector:
+      name: geoexplorer
+- apiVersion: v1
+  kind: Route
+  metadata:
+    name: geoexplorer
+  spec:
+    to:
+      kind: Service
+      name: geoexplorer
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    annotations:
+      description: Keeps track of changes in the application image
+    name: geoserver
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    annotations:
+      description: Keeps track of changes in the application image
+    name: geoexplorer
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    annotations:
+      description: Defines how to build the application
+    name: geoserver
+  spec:
+    output:
+      to:
+        kind: ImageStreamTag
+        name: geoserver:latest
+    source:
+      contextDir: ${SERVER_CONTEXT_DIR}
+      git:
+        ref: ${SERVER_SOURCE_REPOSITORY_REF}
+        uri: ${SERVER_SOURCE_REPOSITORY_URL}
+      type: Git
+    strategy:
+      dockerStrategy:
+      type: Docker
+    triggers:
+    - generic:
+        secret: ${SERVER_GENERIC_WEBHOOK_SECRET}
+      type: Generic
+    - github:
+        secret: ${SERVER_GITHUB_WEBHOOK_SECRET}
+      type: GitHub
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    annotations:
+      description: Defines how to build the application
+    name: geoexplorer
+  spec:
+    output:
+      to:
+        kind: ImageStreamTag
+        name: geoexplorer:latest
+    source:
+      contextDir: ${EXPLORER_CONTEXT_DIR}
+      git:
+        ref: ${EXPLORER_SOURCE_REPOSITORY_REF}
+        uri: ${EXPLORER_SOURCE_REPOSITORY_URL}
+      type: Git
+    strategy:
+      dockerStrategy:
+      type: Docker
+    triggers:
+    - generic:
+        secret: ${EXPLORER_GENERIC_WEBHOOK_SECRET}
+      type: Generic
+    - github:
+        secret: ${EXPLORER_GITHUB_WEBHOOK_SECRET}
+      type: GitHub
+
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    annotations:
+      description: Defines how to deploy the application server
+    name: geoserver
+  spec:
+    replicas: 1
+    selector:
+      name: geoserver
+    strategy:
+      type: Rolling
+    template:
+      metadata:
+        labels:
+          name: geoserver
+        name: geoserver
+      spec:
+        containers:
+        - env:
+          image: geoserver
+          name: geoserver
+          ports:
+          - containerPort: 8080
+        - env:
+          - name: POSTGRES_USER
+            value: ${POSTGRES_USER}
+          - name: POSTGRES_PASS
+            value: ${POSTGRES_PASS}
+          image: docker.io/kartoza/postgis
+          name: postgis
+          ports:
+          - containerPort: 5432
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - geoserver
+        from:
+          kind: ImageStreamTag
+          name: geoserver:latest
+      type: ImageChange
+    - type: ConfigChange
+
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    annotations:
+      description: Defines how to deploy the application server
+    name: geoexplorer
+  spec:
+    replicas: 1
+    selector:
+      name: geoexplorer
+    strategy:
+      type: Rolling
+    template:
+      metadata:
+        labels:
+          name: geoexplorer
+        name: geoexplorer
+      spec:
+        containers:
+        - env:
+          image: geoexplorer
+          name: geoexplorer
+          ports:
+          - containerPort: 8080
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - geoexplorer
+        from:
+          kind: ImageStreamTag
+          name: geoexplorer:latest
+      type: ImageChange
+    - type: ConfigChange
+
+parameters:
+- description: The URL of the repository with your GeoServer Dockerfile
+  name: SERVER_SOURCE_REPOSITORY_URL
+  value: https://github.com/openshift-geopaas/geoserver-lite
+- description: Set this to a branch name, tag or other ref of your repository if you
+    are not using the default branch
+  name: SERVER_SOURCE_REPOSITORY_REF
+- description: Set this to the relative path to your project if it is not in the root
+    of your repository
+  name: SERVER_CONTEXT_DIR
+
+- description: The URL of the repository with your GeoExplorer Dockerfile
+  name: EXPLORER_SOURCE_REPOSITORY_URL
+  value: https://github.com/openshift-geopaas/geoexplorer-lite
+- description: Set this to a branch name, tag or other ref of your repository if you
+    are not using the default branch
+  name: EXPLORER_SOURCE_REPOSITORY_REF
+- description: Set this to the relative path to your project if it is not in the root
+    of your repository
+  name: EXPLORER_CONTEXT_DIR
+
+- description: A secret string used to configure the GeoServer GitHub webhook
+  from: '[a-zA-Z0-9]{40}'
+  generate: expression
+  name: SERVER_GITHUB_WEBHOOK_SECRET
+- description: A secret string used to configure the GeoServer Generic webhook
+  from: '[a-zA-Z0-9]{40}'
+  generate: expression
+  name: SERVER_GENERIC_WEBHOOK_SECRET
+
+- description: A secret string used to configure the GeoExplorer GitHub webhook
+  from: '[a-zA-Z0-9]{40}'
+  generate: expression
+  name: EXPLORER_GITHUB_WEBHOOK_SECRET
+- description: A secret string used to configure the GeoExplorer Generic webhook
+  from: '[a-zA-Z0-9]{40}'
+  generate: expression
+  name: EXPLORER_GENERIC_WEBHOOK_SECRET
+
+- description: The user for the postgis database
+  name: POSTGRES_USER
+  value: docker
+- description: The password for the postgis database
+  name: POSTGRES_PASS
+  value: docker
+
