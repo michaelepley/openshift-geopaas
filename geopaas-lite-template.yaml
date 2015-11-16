@@ -4,11 +4,11 @@ labels:
   template: GeoSuite
 metadata:
   annotations:
-    description: GeoExplorer and GeoServer
+    description: GeoExplorer, GeoServer, and a PostGIS database.
     iconClass: icon-tomcat
     tags: geopaaslite
   creationTimestamp: null
-  name: GeoPaaS Lite
+  name: geopaaslite
 objects:
 - apiVersion: v1
   kind: Service
@@ -21,9 +21,6 @@ objects:
     - name: web
       port: 8080
       targetPort: 8080
-    - name: psql
-      port: 5432
-      targetPort: 5432
     selector:
       name: geoserver
 - apiVersion: v1
@@ -34,6 +31,19 @@ objects:
     to:
       kind: Service
       name: geoserver
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      description: Exposes and load balances the application pods
+    name: postgis
+  spec:
+    ports:
+    - name: psql
+      port: 5432
+      targetPort: 5432
+    selector:
+      name: postgis
 - apiVersion: v1
   kind: Service
   metadata:
@@ -56,11 +66,27 @@ objects:
       kind: Service
       name: geoexplorer
 - apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${DATABASE_SERVICE_NAME}
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${VOLUME_CAPACITY}
+- apiVersion: v1
   kind: ImageStream
   metadata:
     annotations:
       description: Keeps track of changes in the application image
     name: geoserver
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    annotations:
+      description: Keeps track of changes in the application image
+    name: postgis
 - apiVersion: v1
   kind: ImageStream
   metadata:
@@ -93,6 +119,33 @@ objects:
       type: Generic
     - github:
         secret: ${SERVER_GITHUB_WEBHOOK_SECRET}
+      type: GitHub
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    annotations:
+      description: Defines how to build the application
+    name: postgis
+  spec:
+    output:
+      to:
+        kind: ImageStreamTag
+        name: postgis:latest
+    source:
+      contextDir: ${POSTGIS_CONTEXT_DIR}
+      git:
+        ref: ${POSTGIS_SOURCE_REPOSITORY_REF}
+        uri: ${POSTGIS_SOURCE_REPOSITORY_URL}
+      type: Git
+    strategy:
+      dockerStrategy:
+      type: Docker
+    triggers:
+    - generic:
+        secret: ${POSTGIS_GENERIC_WEBHOOK_SECRET}
+      type: Generic
+    - github:
+        secret: ${POSTGIS_GITHUB_WEBHOOK_SECRET}
       type: GitHub
 - apiVersion: v1
   kind: BuildConfig
@@ -146,15 +199,6 @@ objects:
           name: geoserver
           ports:
           - containerPort: 8080
-        - env:
-          - name: POSTGRES_USER
-            value: ${POSTGRES_USER}
-          - name: POSTGRES_PASS
-            value: ${POSTGRES_PASS}
-          image: docker.io/kartoza/postgis
-          name: postgis
-          ports:
-          - containerPort: 5432
     triggers:
     - imageChangeParams:
         automatic: true
@@ -163,6 +207,52 @@ objects:
         from:
           kind: ImageStreamTag
           name: geoserver:latest
+      type: ImageChange
+    - type: ConfigChange
+
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    annotations:
+      description: Defines how to deploy the application server
+    name: postgis
+  spec:
+    replicas: 1
+    selector:
+      name: postgis
+    strategy:
+      type: Rolling
+    template:
+      metadata:
+        labels:
+          name: postgis
+        name: postgis
+      spec:
+        containers:
+        - env:
+          - name: POSTGRES_USER
+            value: ${POSTGRES_USER}
+          - name: POSTGRES_PASS
+            value: ${POSTGRES_PASS}
+          image: postgis
+          name: postgis
+          ports:
+          - containerPort: 5432
+          volumeMounts:
+          - mountPath: /var/lib/postgresql
+            name: ${DATABASE_SERVICE_NAME}-data
+        volumes:
+        - name: ${DATABASE_SERVICE_NAME}-data
+          persistentVolumeClaim:
+            claimName: ${DATABASE_SERVICE_NAME}
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - postgis
+        from:
+          kind: ImageStreamTag
+          name: postgis:latest
       type: ImageChange
     - type: ConfigChange
 
@@ -212,6 +302,16 @@ parameters:
     of your repository
   name: SERVER_CONTEXT_DIR
 
+- description: The URL of the repository with your PostGIS Dockerfile
+  name: POSTGIS_SOURCE_REPOSITORY_URL
+  value: https://github.com/openshift-geopaas/docker-postgis
+- description: Set this to a branch name, tag or other ref of your repository if you
+    are not using the default branch
+  name: POSTGIS_SOURCE_REPOSITORY_REF
+- description: Set this to the relative path to your project if it is not in the root
+    of your repository
+  name: POSTGIS_CONTEXT_DIR
+
 - description: The URL of the repository with your GeoExplorer Dockerfile
   name: EXPLORER_SOURCE_REPOSITORY_URL
   value: https://github.com/openshift-geopaas/geoexplorer-lite
@@ -231,6 +331,17 @@ parameters:
   generate: expression
   name: SERVER_GENERIC_WEBHOOK_SECRET
 
+- description: A secret string used to configure the PostGIS GitHub webhook
+  from: '[a-zA-Z0-9]{40}'
+  generate: expression
+  name: POSTGIS_GITHUB_WEBHOOK_SECRET
+- description: A secret string used to configure the PostGIS Generic webhook
+  from: '[a-zA-Z0-9]{40}'
+  generate: expression
+  name: POSTGIS_GENERIC_WEBHOOK_SECRET
+
+
+
 - description: A secret string used to configure the GeoExplorer GitHub webhook
   from: '[a-zA-Z0-9]{40}'
   generate: expression
@@ -246,4 +357,13 @@ parameters:
 - description: The password for the postgis database
   name: POSTGRES_PASS
   value: docker
+- description: Database service name
+  name: DATABASE_SERVICE_NAME
+  required: true
+  value: postgis
+- description: Volume space available for data, e.g. 512Mi, 2Gi
+  name: VOLUME_CAPACITY
+  required: true
+  value: 512Mi
+
 
