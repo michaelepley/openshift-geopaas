@@ -331,7 +331,7 @@ objects:
       spec:
         containers:
         - env:
-          image: wlaforest/mongodbgeo
+          image: wlaforest/mongodbgeo:v1
           name: mongodbgeo
           ports:
           - containerPort: 27017
