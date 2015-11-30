@@ -66,6 +66,27 @@ objects:
       kind: Service
       name: geoexplorer
 - apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      description: Exposes and load balances the application pods
+    name: mongodbgeo
+  spec:
+    ports:
+    - name: mongodb
+      port: 27017
+      targetPort: 27017
+    selector:
+      name: mongodbgeo
+- apiVersion: v1
+  kind: Route
+  metadata:
+    name: mongodbgeo
+  spec:
+    to:
+      kind: Service
+      name: mongodbgeo
+- apiVersion: v1
   kind: PersistentVolumeClaim
   metadata:
     name: ${DATABASE_SERVICE_NAME}
@@ -289,6 +310,32 @@ objects:
           kind: ImageStreamTag
           name: geoexplorer:latest
       type: ImageChange
+    - type: ConfigChange
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    annotations:
+      description: Defines how to deploy the application server
+    name: mongodbgeo
+  spec:
+    replicas: 1
+    selector:
+      name: mongodbgeo
+    strategy:
+      type: Rolling
+    template:
+      metadata:
+        labels:
+          name: mongodbgeo
+        name: mongodbgeo
+      spec:
+        containers:
+        - env:
+          image: wlaforest/mongodbgeo
+          name: mongodbgeo
+          ports:
+          - containerPort: 27017
+    triggers:
     - type: ConfigChange
 
 parameters:
